@@ -30,16 +30,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: "platform-tools"
 
       - name: Accept Android SDK licenses
         shell: bash
         run: |
-          set +o pipefail
           yes | sdkmanager --licenses || true
 
-      - name: Install required SDK packages
+      - name: Install Android SDK packages
         shell: bash
         run: |
           sdkmanager --install \
@@ -47,10 +44,32 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Locate Android project
+      - name: Extract Android project ZIP
         shell: bash
         run: |
           set -e
+
+          ZIP_FILE="LIVE_STAR_APK_AAB_TESTED_PROJECT.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Project ZIP not found: $ZIP_FILE"
+            echo "Files available in repository:"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p extracted_project
+          unzip -q "$ZIP_FILE" -d extracted_project
+
+          echo "ZIP extracted successfully."
+          echo "Extracted files:"
+          find extracted_project -maxdepth 3 -type f | head -100
+
+      - name: Locate Android Gradle project
+        shell: bash
+        run: |
+          set -e
+
           PROJECT_DIR=""
 
           while IFS= read -r FILE; do
@@ -61,41 +80,54 @@ jobs:
               break
             fi
           done < <(
-            find . -type f \
-              \( -name settings.gradle -o -name settings.gradle.kts \) \
+            find extracted_project -type f \
+              \( -name settings.gradle \
+                 -o -name settings.gradle.kts \) \
               -not -path "*/.gradle/*" \
               -not -path "*/build/*"
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project with gradlew not found."
+            echo "ERROR: No complete Gradle project found in ZIP."
+            echo "Searching for Gradle project files:"
+            find extracted_project -type f \
+              \( -name gradlew \
+                 -o -name settings.gradle \
+                 -o -name settings.gradle.kts \
+                 -o -name build.gradle \
+                 -o -name build.gradle.kts \)
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found Android project: $PROJECT_DIR"
+          echo "Android project found: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build APK and AAB
+      - name: Build Debug APK and AAB
         shell: bash
         run: |
           set -e
+
           cd "$PROJECT_DIR"
           chmod +x ./gradlew
-          ./gradlew --no-daemon assembleDebug bundleDebug
+
+          ./gradlew --no-daemon \
+            assembleDebug \
+            bundleDebug \
+            --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: LIVE-STAR-APK
-          path: "**/build/outputs/apk/debug/*.apk"
+          path: "extracted_project/**/build/outputs/apk/debug/*.apk"
           if-no-files-found: error
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
           name: LIVE-STAR-AAB
-          path: "**/build/outputs/bundle/debug/*.aab"
+          path: "extracted_project/**/build/outputs/bundle/debug/*.aab"
           if-no-files-found: error
