@@ -27,29 +27,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Find Android SDK Manager
-        shell: bash
-        run: |
-          set -e
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -f "$SDKMANAGER" ]; then
-            echo "SDK Manager not found at $SDKMANAGER"
-            find "$ANDROID_HOME/cmdline-tools" -name sdkmanager
-            exit 1
-          fi
-
-          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Accept Android SDK licenses
         shell: bash
         run: |
-          set -o pipefail
-          yes | "$SDKMANAGER" --licenses
+          yes | sdkmanager --licenses || true
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
-          "$SDKMANAGER" --install \
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -58,14 +47,13 @@ jobs:
         shell: bash
         run: |
           set -e
+
           PROJECT_DIR=""
 
           while IFS= read -r FILE; do
             DIR=$(dirname "$FILE")
 
-            if [ -f "$DIR/gradlew" ] &&
-               { [ -f "$DIR/settings.gradle" ] ||
-                 [ -f "$DIR/settings.gradle.kts" ]; }; then
+            if [ -f "$DIR/gradlew" ]; then
               PROJECT_DIR="$DIR"
               break
             fi
@@ -77,12 +65,13 @@ jobs:
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project or Gradle Wrapper not found."
+            echo "ERROR: Android project or gradlew not found."
+            echo "The repository must contain a complete Android project."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project: $PROJECT_DIR"
+          echo "Android project found: $PROJECT_DIR"
 
       - name: Build APK and AAB
         shell: bash
