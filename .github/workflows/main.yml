@@ -14,25 +14,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Find Android SDK Manager
+        shell: bash
+        run: |
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            echo "SDK Manager not found at $SDKMANAGER"
+            find "$ANDROID_HOME/cmdline-tools" -name sdkmanager
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
 
       - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+        shell: bash
+        run: |
+          set -o pipefail
+          yes | "$SDKMANAGER" --licenses
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager --install \
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -43,44 +60,37 @@ jobs:
           set -e
           PROJECT_DIR=""
 
-          for f in settings.gradle settings.gradle.kts; do
-            FOUND=$(find . -type f -name "$f" \
-              -not -path "*/.gradle/*" \
-              -not -path "*/build/*" \
-              -print -quit)
+          while IFS= read -r FILE; do
+            DIR=$(dirname "$FILE")
 
-            if [ -n "$FOUND" ]; then
-              PROJECT_DIR=$(dirname "$FOUND")
+            if [ -f "$DIR/gradlew" ] &&
+               { [ -f "$DIR/settings.gradle" ] ||
+                 [ -f "$DIR/settings.gradle.kts" ]; }; then
+              PROJECT_DIR="$DIR"
               break
             fi
-          done
+          done < <(
+            find . -type f \
+              \( -name settings.gradle -o -name settings.gradle.kts \) \
+              -not -path "*/.gradle/*" \
+              -not -path "*/build/*"
+          )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Android project settings.gradle was not found."
-            echo "Check that the repository contains the Android project."
+            echo "ERROR: Android project or Gradle Wrapper not found."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found: $PROJECT_DIR"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+          echo "Found project: $PROJECT_DIR"
 
       - name: Build APK and AAB
         shell: bash
         run: |
           set -e
           cd "$PROJECT_DIR"
-
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug bundleDebug
-          else
-            echo "ERROR: gradlew is missing from the Android project."
-            echo "The project must include the Gradle Wrapper."
-            exit 1
-          fi
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug bundleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
