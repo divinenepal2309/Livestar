@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,11 +28,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          set +e
-          yes | sdkmanager --licenses
-          true
+        run: yes | sdkmanager --licenses || true
 
       - name: Install Android SDK packages
         run: |
@@ -41,89 +37,61 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Locate and extract Android project
+      - name: Locate Android project
         shell: bash
         run: |
           set -e
-
-          ROOT="$GITHUB_WORKSPACE"
           PROJECT_DIR=""
 
-          if [ -f "$ROOT/settings.gradle" ] || \
-             [ -f "$ROOT/settings.gradle.kts" ]; then
-            PROJECT_DIR="$ROOT"
-          else
-            ZIP_FILE="$(find "$ROOT" -maxdepth 4 -type f \
-              -iname 'LIVE_STAR_CREATOR_PROFILE_STUDIO_UPDATED.zip' \
-              ! -path '*/.git/*' | head -n 1)"
+          for f in settings.gradle settings.gradle.kts; do
+            FOUND=$(find . -type f -name "$f" \
+              -not -path "*/.gradle/*" \
+              -not -path "*/build/*" \
+              -print -quit)
 
-            if [ -z "$ZIP_FILE" ]; then
-              ZIP_FILE="$(find "$ROOT" -maxdepth 4 -type f \
-                -iname '*.zip' ! -path '*/.git/*' | head -n 1)"
+            if [ -n "$FOUND" ]; then
+              PROJECT_DIR=$(dirname "$FOUND")
+              break
             fi
+          done
 
-            if [ -z "$ZIP_FILE" ]; then
-              echo "ERROR: Android project ZIP was not found."
-              exit 1
-            fi
-
-            echo "Using ZIP: $ZIP_FILE"
-            mkdir -p "$ROOT/_live_star_project"
-            unzip -oq "$ZIP_FILE" -d "$ROOT/_live_star_project"
-
-            SETTINGS_FILE="$(find "$ROOT/_live_star_project" -type f \
-              \( -name settings.gradle -o -name settings.gradle.kts \) \
-              ! -path '*/.gradle/*' | head -n 1)"
-
-            if [ -z "$SETTINGS_FILE" ]; then
-              echo "ERROR: settings.gradle not found inside ZIP."
-              find "$ROOT/_live_star_project" -maxdepth 5 -type f | head -n 100
-              exit 1
-            fi
-
-            PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: app/build.gradle not found."
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android project settings.gradle was not found."
+            echo "Check that the repository contains the Android project."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project directory: $PROJECT_DIR"
+          echo "Android project found: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK and AAB
+      - name: Build APK and AAB
         shell: bash
         run: |
           set -e
           cd "$PROJECT_DIR"
 
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew --no-daemon --refresh-dependencies \
-              assembleDebug bundleDebug --stacktrace
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug bundleDebug
           else
-            echo "Gradle wrapper missing; using Gradle installed by setup-gradle."
-            gradle --no-daemon --refresh-dependencies \
-              assembleDebug bundleDebug --stacktrace
+            echo "ERROR: gradlew is missing from the Android project."
+            echo "The project must include the Gradle Wrapper."
+            exit 1
           fi
 
-      - name: Upload Debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: LIVE-STAR-APK
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          path: "**/build/outputs/apk/debug/*.apk"
           if-no-files-found: error
-          retention-days: 14
 
-      - name: Upload Debug AAB
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
           name: LIVE-STAR-AAB
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/bundle/debug/app-debug.aab
+          path: "**/build/outputs/bundle/debug/*.aab"
           if-no-files-found: error
-          retention-days: 14
