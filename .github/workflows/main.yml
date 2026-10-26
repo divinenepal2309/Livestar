@@ -30,6 +30,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Accept Android SDK licenses
         shell: bash
@@ -49,12 +51,12 @@ jobs:
         run: |
           set -e
 
-          ZIP_FILE="LIVE_STAR_APK_AAB_TESTED_PROJECT.zip"
+          ZIP_FILE="LIVE_STAR_CREATOR_PROFILE_STUDIO_UPDATED.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: Project ZIP not found: $ZIP_FILE"
-            echo "Files available in repository:"
-            ls -la
+            echo "Available ZIP files:"
+            find . -maxdepth 3 -type f -iname "*.zip"
             exit 1
           fi
 
@@ -62,14 +64,11 @@ jobs:
           unzip -q "$ZIP_FILE" -d extracted_project
 
           echo "ZIP extracted successfully."
-          echo "Extracted files:"
-          find extracted_project -maxdepth 3 -type f | head -100
 
       - name: Locate Android Gradle project
         shell: bash
         run: |
           set -e
-
           PROJECT_DIR=""
 
           while IFS= read -r FILE; do
@@ -88,8 +87,8 @@ jobs:
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No complete Gradle project found in ZIP."
-            echo "Searching for Gradle project files:"
+            echo "ERROR: Complete Android Gradle project not found."
+            echo "Gradle files found:"
             find extracted_project -type f \
               \( -name gradlew \
                  -o -name settings.gradle \
@@ -100,7 +99,7 @@ jobs:
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project found: $PROJECT_DIR"
+          echo "Project found: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -109,10 +108,8 @@ jobs:
         shell: bash
         run: |
           set -e
-
           cd "$PROJECT_DIR"
           chmod +x ./gradlew
-
           ./gradlew --no-daemon \
             assembleDebug \
             bundleDebug \
